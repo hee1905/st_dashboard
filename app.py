@@ -13,6 +13,13 @@ DATA_DIR = "data"
 
 @st.cache_data
 def load_data():
+    # 디버깅을 위한 로그 출력 (Streamlit Cloud Manage app -> Logs에서 확인 가능)
+    print(f"Current working directory: {os.getcwd()}")
+    if os.path.exists(DATA_DIR):
+        print(f"Contents of {DATA_DIR}: {os.listdir(DATA_DIR)}")
+    else:
+        print(f"Directory {DATA_DIR} NOT FOUND")
+
     files = {
         "비타민D": {
             "shop": "비타민d_20260213_naver_shop.csv",
@@ -40,6 +47,8 @@ def load_data():
                 elif dtype == 'shop':
                     df['lprice'] = pd.to_numeric(df['lprice'], errors='coerce')
                 data[kw][dtype] = df
+            else:
+                print(f"FILE MISSING: {path}")
     return data
 
 data_all = load_data()
@@ -112,10 +121,15 @@ else:
             # 3. 그래프: 브랜드 점유율 (Bar Chart)
             st.subheader("주요 브랜드 빈도 (상위 10개)")
             brand_kw = st.selectbox("브랜드를 확인할 키워드 선택", selected_keywords, key="brand_sel")
-            brand_counts = data_all[brand_kw]['shop']['brand'].value_counts().head(10).reset_index()
-            brand_counts.columns = ['brand', 'count']
-            fig_brand = px.bar(brand_counts, x='brand', y='count', title=f"{brand_kw} 주요 브랜드")
-            st.plotly_chart(fig_brand, use_container_width=True)
+            
+            shop_data = data_all[brand_kw].get('shop')
+            if shop_data is not None:
+                brand_counts = shop_data['brand'].value_counts().head(10).reset_index()
+                brand_counts.columns = ['brand', 'count']
+                fig_brand = px.bar(brand_counts, x='brand', y='count', title=f"{brand_kw} 주요 브랜드")
+                st.plotly_chart(fig_brand, use_container_width=True)
+            else:
+                st.error(f"{brand_kw}의 쇼핑 데이터(CSV)를 찾을 수 없습니다.")
 
         with col2:
             # 4. 그래프: 쇼핑몰별 평균 가격 (Bar Chart)

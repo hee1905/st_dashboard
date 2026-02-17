@@ -39,14 +39,17 @@ def load_data():
         for dtype, fname in fset.items():
             path = os.path.join(DATA_DIR, fname)
             if os.path.exists(path):
-                df = pd.read_csv(path)
-                if dtype == 'trend':
-                    df['period'] = pd.to_datetime(df['period'])
-                elif dtype == 'blog':
-                    df['postdate'] = pd.to_datetime(df['postdate'], format='%Y%m%d', errors='coerce')
-                elif dtype == 'shop':
-                    df['lprice'] = pd.to_numeric(df['lprice'], errors='coerce')
-                data[kw][dtype] = df
+                try:
+                    df = pd.read_csv(path)
+                    if dtype == 'trend':
+                        df['period'] = pd.to_datetime(df['period'])
+                    elif dtype == 'blog':
+                        df['postdate'] = pd.to_datetime(df['postdate'], format='%Y%m%d', errors='coerce')
+                    elif dtype == 'shop':
+                        df['lprice'] = pd.to_numeric(df['lprice'], errors='coerce')
+                    data[kw][dtype] = df
+                except Exception as e:
+                    print(f"ERROR READING {path}: {e}")
             else:
                 print(f"FILE MISSING: {path}")
     return data
@@ -76,13 +79,18 @@ else:
         
         # 1. 그래프: 트렌드 비교 (Line Chart)
         fig_trend = go.Figure()
+        trend_found = False
         for kw in selected_keywords:
             if 'trend' in data_all[kw]:
                 df_trend = data_all[kw]['trend']
                 fig_trend.add_trace(go.Scatter(x=df_trend['period'], y=df_trend['ratio'], name=kw, mode='lines'))
+                trend_found = True
         
-        fig_trend.update_layout(title="기간별 검색 비율(ratio) 추이", xaxis_title="날짜", yaxis_title="검색 비율")
-        st.plotly_chart(fig_trend, use_container_width=True)
+        if trend_found:
+            fig_trend.update_layout(title="기간별 검색 비율(ratio) 추이", xaxis_title="날짜", yaxis_title="검색 비율")
+            st.plotly_chart(fig_trend, use_container_width=True)
+        else:
+            st.error("트렌드 데이터(trend CSV)를 찾을 수 없습니다.")
 
         # 1. 표: 트렌드 통계 (Trend Stats)
         st.subheader("트렌드 기초 통계")
@@ -97,7 +105,8 @@ else:
                     "최소": s['min'],
                     "표준편차": round(s['std'], 2)
                 })
-        st.table(pd.DataFrame(trend_stats))
+        if trend_stats:
+            st.table(pd.DataFrame(trend_stats))
 
     with tab2:
         st.header("쇼핑 시장 데이터 분석")
@@ -129,15 +138,20 @@ else:
                 fig_brand = px.bar(brand_counts, x='brand', y='count', title=f"{brand_kw} 주요 브랜드")
                 st.plotly_chart(fig_brand, use_container_width=True)
             else:
-                st.error(f"{brand_kw}의 쇼핑 데이터(CSV)를 찾을 수 없습니다.")
+                st.error(f"{brand_kw}의 쇼핑 데이터(shop CSV)를 찾을 수 없습니다.")
 
         with col2:
             # 4. 그래프: 쇼핑몰별 평균 가격 (Bar Chart)
             st.subheader("쇼핑몰별 평균 가격 비교")
             mall_kw = st.selectbox("쇼핑몰을 확인할 키워드 선택", selected_keywords, key="mall_sel")
-            mall_price = data_all[mall_kw]['shop'].groupby('mallName')['lprice'].mean().sort_values(ascending=False).head(15).reset_index()
-            fig_mall = px.bar(mall_price, x='mallName', y='lprice', title=f"{mall_kw} 쇼핑몰별 평균가")
-            st.plotly_chart(fig_mall, use_container_width=True)
+            
+            mall_shop_data = data_all[mall_kw].get('shop')
+            if mall_shop_data is not None:
+                mall_price = mall_shop_data.groupby('mallName')['lprice'].mean().sort_values(ascending=False).head(15).reset_index()
+                fig_mall = px.bar(mall_price, x='mallName', y='lprice', title=f"{mall_kw} 쇼핑몰별 평균가")
+                st.plotly_chart(fig_mall, use_container_width=True)
+            else:
+                st.error(f"{mall_kw}의 쇼핑 데이터(shop CSV)를 찾을 수 없습니다.")
 
         # 2~4. 표 구성
         st.divider()
@@ -147,45 +161,52 @@ else:
         with t_col1:
             # 2. 표: 브랜드 요약 (Brand Summary)
             st.write("📌 브랜드별 요약 (선택 키워드)")
-            brand_summary = data_all[mall_kw]['shop'].groupby('brand')['lprice'].agg(['mean', 'count']).sort_values('count', ascending=False).head(10)
-            st.write(brand_summary)
+            curr_shop_data = data_all[mall_kw].get('shop')
+            if curr_shop_data is not None:
+                brand_summary = curr_shop_data.groupby('brand')['lprice'].agg(['mean', 'count']).sort_values('count', ascending=False).head(10)
+                st.write(brand_summary)
             
             # 3. 표: 쇼핑몰 통계 (Mall Statistics)
             st.write("📌 쇼핑몰별 가격 통계")
-            mall_stats = data_all[mall_kw]['shop'].groupby('mallName')['lprice'].agg(['min', 'max', 'mean']).head(10)
-            st.write(mall_stats)
+            if curr_shop_data is not None:
+                mall_stats = curr_shop_data.groupby('mallName')['lprice'].agg(['min', 'max', 'mean']).head(10)
+                st.write(mall_stats)
             
         with t_col2:
             # 4. 표: Raw Data Preview
             st.write("📌 원본 데이터 미리보기")
-            st.dataframe(data_all[mall_kw]['shop'][['title', 'lprice', 'brand', 'mallName']].head(10))
+            if curr_shop_data is not None:
+                st.dataframe(curr_shop_data[['title', 'lprice', 'brand', 'mallName']].head(10))
 
     with tab3:
         st.header("블로그 게시글 키워드 분석")
         
         blog_kw = st.selectbox("블로그 분석 키워드 선택", selected_keywords, key="blog_sel")
-        df_blog = data_all[blog_kw]['blog']
-        
-        # TF-IDF 분석
-        vectorizer = TfidfVectorizer(max_features=50)
-        df_blog['content'] = df_blog['title'] + " " + df_blog['description']
-        tfidf_matrix = vectorizer.fit_transform(df_blog['content'].fillna(''))
-        
-        feature_names = vectorizer.get_feature_names_out()
-        sums = tfidf_matrix.sum(axis=0)
-        kw_data = []
-        for col, idx in enumerate(feature_names):
-            kw_data.append((idx, sums[0, col]))
-        
-        ranking = pd.DataFrame(kw_data, columns=['term', 'rank']).sort_values('rank', ascending=False).head(20)
-        
-        # 5. 그래프: 키워드 빈도 (Bar Chart)
-        fig_kw = px.bar(ranking, x='term', y='rank', title=f"{blog_kw} 블로그 주요 키워드 (TF-IDF)")
-        st.plotly_chart(fig_kw, use_container_width=True)
-        
-        # 5. 표: 키워드 순위 (Keyword Ranking)
-        st.subheader("핵심 키워드 순위표")
-        st.table(ranking)
+        if 'blog' in data_all[blog_kw]:
+            df_blog = data_all[blog_kw]['blog']
+            
+            # TF-IDF 분석
+            vectorizer = TfidfVectorizer(max_features=50)
+            df_blog['content'] = df_blog['title'] + " " + df_blog['description']
+            tfidf_matrix = vectorizer.fit_transform(df_blog['content'].fillna(''))
+            
+            feature_names = vectorizer.get_feature_names_out()
+            sums = tfidf_matrix.sum(axis=0)
+            kw_data = []
+            for col, idx in enumerate(feature_names):
+                kw_data.append((idx, sums[0, col]))
+            
+            ranking = pd.DataFrame(kw_data, columns=['term', 'rank']).sort_values('rank', ascending=False).head(20)
+            
+            # 5. 그래프: 키워드 빈도 (Bar Chart)
+            fig_kw = px.bar(ranking, x='term', y='rank', title=f"{blog_kw} 블로그 주요 키워드 (TF-IDF)")
+            st.plotly_chart(fig_kw, use_container_width=True)
+            
+            # 5. 표: 키워드 순위 (Keyword Ranking)
+            st.subheader("핵심 키워드 순위표")
+            st.table(ranking)
+        else:
+            st.error(f"{blog_kw}의 블로그 데이터(blog CSV)를 찾을 수 없습니다.")
 
 st.sidebar.markdown("---")
 st.sidebar.info("이 대시보드는 네이버 오픈 API 데이터를 기반으로 생성되었습니다.")
